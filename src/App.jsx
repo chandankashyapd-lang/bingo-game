@@ -3,15 +3,16 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const GRID_SIZE = 5;
 const TOTAL_CELLS = GRID_SIZE * GRID_SIZE;
 const INIT_TIME = 45;
+const LOBBY_COUNTDOWN = 60;
+const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 4;
 const BINGO_LETTERS = ["B", "I", "N", "G", "O"];
 
-const shuffleArray = () => {
-  const arr = Array.from({ length: TOTAL_CELLS }, (_, i) => i + 1);
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
+const generateRoomCode = () => {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
 };
 
 const createEmptyGrid = () => Array(TOTAL_CELLS).fill(null);
@@ -43,19 +44,18 @@ const PLAYER_THEMES = [
 
 const AVATARS = ["🎯", "🎲", "🃏", "🏆", "⚡", "🔥", "🌟", "🎪", "🎭", "🎨", "🚀", "💎", "🦊", "🐺", "🦁", "🐲"];
 
-const PHASES = { LOBBY: "lobby", PROFILE: "profile", SETUP: "setup", INIT: "init", PLAY: "play", GAMEOVER: "gameover", STATS: "stats" };
+const PHASES = {
+  PROFILE: "profile", HOME: "home", LOBBY_CREATE: "lobby_create",
+  LOBBY_WAIT: "lobby_wait", LOBBY_JOIN: "lobby_join",
+  INIT: "init", PLAY: "play", GAMEOVER: "gameover", STATS: "stats",
+};
 
 const STORAGE_KEY = "bingo-profile";
 
 const defaultProfile = () => ({
-  id: `player_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-  name: "",
-  avatar: "🎯",
-  gamesPlayed: 0,
-  gamesWon: 0,
-  winStreak: 0,
-  bestStreak: 0,
-  totalSequences: 0,
+  id: `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  name: "", avatar: "🎯",
+  gamesPlayed: 0, gamesWon: 0, winStreak: 0, bestStreak: 0, totalSequences: 0,
   createdAt: Date.now(),
 });
 
@@ -67,12 +67,8 @@ function usePersistedProfile() {
     (async () => {
       try {
         const result = await window.storage.get(STORAGE_KEY);
-        if (result && result.value) {
-          setProfile(JSON.parse(result.value));
-        }
-      } catch {
-        // No profile yet
-      }
+        if (result && result.value) setProfile(JSON.parse(result.value));
+      } catch {}
       setLoading(false);
     })();
   }, []);
@@ -91,36 +87,59 @@ function usePersistedProfile() {
   return { profile, updateProfile, loading };
 }
 
+// ─── Shared Styles ───
+const cardStyle = {
+  background: "rgba(255,255,255,0.04)",
+  borderRadius: 24, border: "1px solid rgba(255,255,255,0.08)",
+  boxShadow: "0 12px 48px rgba(0,0,0,0.3)",
+};
+
+const labelStyle = {
+  fontFamily: "'DM Mono', monospace", fontSize: 11,
+  color: "#555", fontWeight: 500, letterSpacing: "0.1em",
+  display: "block", marginBottom: 8,
+};
+
+const btnPrimary = {
+  width: "100%", padding: "14px", borderRadius: 14, border: "none",
+  background: "linear-gradient(135deg, #E8443A, #FF6B61)",
+  color: "#fff", fontFamily: "'Fredoka', sans-serif",
+  fontSize: 17, fontWeight: 700, cursor: "pointer",
+  boxShadow: "0 4px 20px rgba(232,68,58,0.4)", transition: "transform 0.2s",
+};
+
+const btnSecondary = {
+  width: "100%", padding: "12px", borderRadius: 14,
+  border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)",
+  color: "#ccc", fontFamily: "'Fredoka', sans-serif",
+  fontSize: 15, fontWeight: 600, cursor: "pointer", transition: "all 0.2s",
+};
+
+const inputStyle = {
+  width: "100%", padding: "12px 16px", borderRadius: 12,
+  border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)",
+  fontFamily: "'DM Mono', monospace", fontSize: 15, color: "#fff",
+  outline: "none", boxSizing: "border-box",
+};
+
+// ─── Profile Editor ───
 function ProfileEditor({ profile, onSave }) {
   const [name, setName] = useState(profile?.name || "");
   const [avatar, setAvatar] = useState(profile?.avatar || "🎯");
 
   return (
-    <div style={{
-      maxWidth: 440, margin: "0 auto", background: "rgba(255,255,255,0.04)",
-      borderRadius: 28, padding: "36px 32px",
-      border: "1px solid rgba(255,255,255,0.08)",
-      boxShadow: "0 12px 48px rgba(0,0,0,0.3)",
-    }}>
+    <div style={{ maxWidth: 440, margin: "0 auto", ...cardStyle, padding: "36px 32px" }}>
       <h2 style={{
         fontFamily: "'Fredoka', sans-serif", fontSize: 26,
         color: "#fff", margin: "0 0 8px", textAlign: "center",
-      }}>
-        {profile?.name ? "Edit Profile" : "Create Profile"}
-      </h2>
+      }}>{profile?.name ? "Edit Profile" : "Create Profile"}</h2>
       <p style={{
         fontFamily: "'DM Mono', monospace", fontSize: 12,
-        color: "#666", textAlign: "center", margin: "0 0 28px",
-      }}>
-        Your stats persist between sessions
-      </p>
+        color: "#555", textAlign: "center", margin: "0 0 28px",
+      }}>Your stats persist between sessions</p>
 
       <div style={{ marginBottom: 24 }}>
-        <label style={{
-          fontFamily: "'DM Mono', monospace", fontSize: 11,
-          color: "#666", fontWeight: 500, letterSpacing: "0.1em",
-          display: "block", marginBottom: 10,
-        }}>CHOOSE AVATAR</label>
+        <label style={labelStyle}>CHOOSE AVATAR</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
           {AVATARS.map((a) => (
             <button key={a} onClick={() => setAvatar(a)} style={{
@@ -135,19 +154,9 @@ function ProfileEditor({ profile, onSave }) {
       </div>
 
       <div style={{ marginBottom: 28 }}>
-        <label style={{
-          fontFamily: "'DM Mono', monospace", fontSize: 11,
-          color: "#666", fontWeight: 500, letterSpacing: "0.1em",
-          display: "block", marginBottom: 8,
-        }}>DISPLAY NAME</label>
+        <label style={labelStyle}>DISPLAY NAME</label>
         <input type="text" value={name} onChange={(e) => setName(e.target.value.slice(0, 20))}
-          placeholder="Enter your name..."
-          style={{
-            width: "100%", padding: "12px 16px", borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)",
-            fontFamily: "'DM Mono', monospace", fontSize: 15, color: "#fff",
-            outline: "none", boxSizing: "border-box",
-          }}
+          placeholder="Enter your name..." style={inputStyle}
           onFocus={(e) => e.target.style.borderColor = "#E8443A"}
           onBlur={(e) => e.target.style.borderColor = "rgba(255,255,255,0.12)"}
         />
@@ -155,19 +164,14 @@ function ProfileEditor({ profile, onSave }) {
 
       <button onClick={() => name.trim() && onSave({ ...defaultProfile(), ...profile, name: name.trim(), avatar })}
         disabled={!name.trim()}
-        style={{
-          width: "100%", padding: "14px", borderRadius: 14, border: "none",
-          background: name.trim() ? "linear-gradient(135deg, #E8443A, #FF6B61)" : "rgba(255,255,255,0.06)",
-          color: name.trim() ? "#fff" : "#555",
-          fontFamily: "'Fredoka', sans-serif", fontSize: 17, fontWeight: 700,
-          cursor: name.trim() ? "pointer" : "default",
-        }}>
+        style={{ ...btnPrimary, opacity: name.trim() ? 1 : 0.4, cursor: name.trim() ? "pointer" : "default" }}>
         {profile?.name ? "Save Changes" : "Let's Play!"}
       </button>
     </div>
   );
 }
 
+// ─── Stats Panel ───
 function StatsPanel({ profile, onBack }) {
   if (!profile) return null;
   const winRate = profile.gamesPlayed > 0 ? Math.round((profile.gamesWon / profile.gamesPlayed) * 100) : 0;
@@ -181,12 +185,7 @@ function StatsPanel({ profile, onBack }) {
   ];
 
   return (
-    <div style={{
-      maxWidth: 440, margin: "0 auto", background: "rgba(255,255,255,0.04)",
-      borderRadius: 28, padding: "36px 32px",
-      border: "1px solid rgba(255,255,255,0.08)",
-      boxShadow: "0 12px 48px rgba(0,0,0,0.3)",
-    }}>
+    <div style={{ maxWidth: 440, margin: "0 auto", ...cardStyle, padding: "36px 32px" }}>
       <div style={{ textAlign: "center", marginBottom: 24 }}>
         <div style={{ fontSize: 48, marginBottom: 8 }}>{profile.avatar}</div>
         <h2 style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 24, color: "#fff", margin: "0 0 4px" }}>{profile.name}</h2>
@@ -206,16 +205,170 @@ function StatsPanel({ profile, onBack }) {
           </div>
         ))}
       </div>
-      <button onClick={onBack} style={{
-        width: "100%", padding: "12px", borderRadius: 14,
-        border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)",
-        color: "#999", fontFamily: "'Fredoka', sans-serif", fontSize: 15, fontWeight: 600, cursor: "pointer",
-      }}>← Back to Lobby</button>
+      <button onClick={onBack} style={btnSecondary}>← Back</button>
     </div>
   );
 }
 
-function PlayerGrid({ player, isActive, phase, onCellClick, onRandomFill, theme, playerName, playerAvatar, isCurrentTurn, winner }) {
+// ─── Lobby Waiting Room ───
+function LobbyWaitRoom({ room, myId, onStart, onLeave, countdown, isHost }) {
+  const playerCount = room.players.length;
+  const canStart = playerCount >= MIN_PLAYERS;
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", ...cardStyle, padding: "32px 28px" }}>
+      {/* Room Code Display */}
+      <div style={{ textAlign: "center", marginBottom: 24 }}>
+        <div style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 10,
+          color: "#555", letterSpacing: "0.15em", marginBottom: 8,
+        }}>ROOM CODE</div>
+        <div style={{
+          fontFamily: "'Fredoka', sans-serif", fontSize: 48, fontWeight: 700,
+          letterSpacing: "0.15em", color: "#fff",
+          background: "rgba(255,255,255,0.06)", borderRadius: 16,
+          padding: "12px 24px", display: "inline-block",
+          border: "2px dashed rgba(255,255,255,0.15)",
+          userSelect: "all", cursor: "pointer",
+        }}
+          title="Click to copy"
+          onClick={() => { try { navigator.clipboard.writeText(room.code); } catch {} }}
+        >
+          {room.code}
+        </div>
+        <div style={{
+          fontFamily: "'DM Mono', monospace", fontSize: 11,
+          color: "#444", marginTop: 8,
+        }}>Share this code with friends to join</div>
+      </div>
+
+      {/* Players List */}
+      <div style={{ marginBottom: 24 }}>
+        <label style={labelStyle}>PLAYERS ({playerCount}/{MAX_PLAYERS})</label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {room.players.map((p, i) => (
+            <div key={p.id} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 14px", borderRadius: 12,
+              background: p.id === myId ? `${PLAYER_THEMES[i].color}15` : "rgba(255,255,255,0.03)",
+              border: `1px solid ${p.id === myId ? `${PLAYER_THEMES[i].color}30` : "rgba(255,255,255,0.06)"}`,
+              animation: "slideIn 0.3s ease-out",
+            }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: `linear-gradient(135deg, ${PLAYER_THEMES[i].color}, ${PLAYER_THEMES[i].accent})`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 18, flexShrink: 0,
+              }}>{p.avatar}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  fontFamily: "'DM Mono', monospace", fontSize: 14,
+                  color: "#eee", fontWeight: 600,
+                }}>
+                  {p.name}
+                  {p.id === myId && <span style={{ color: "#666", fontSize: 10, marginLeft: 6 }}>(you)</span>}
+                </div>
+                {i === 0 && (
+                  <span style={{
+                    fontFamily: "'DM Mono', monospace", fontSize: 9,
+                    color: PLAYER_THEMES[0].color, letterSpacing: "0.05em",
+                  }}>HOST</span>
+                )}
+              </div>
+              <div style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: "#4ade80", boxShadow: "0 0 8px rgba(74,222,128,0.5)",
+              }} />
+            </div>
+          ))}
+
+          {/* Empty slots */}
+          {Array.from({ length: MAX_PLAYERS - playerCount }).map((_, i) => (
+            <div key={`empty-${i}`} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 14px", borderRadius: 12,
+              background: "rgba(255,255,255,0.02)",
+              border: "1px dashed rgba(255,255,255,0.08)",
+            }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: "rgba(255,255,255,0.04)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 16, color: "#333",
+              }}>?</div>
+              <div style={{
+                fontFamily: "'DM Mono', monospace", fontSize: 13,
+                color: "#333",
+              }}>Waiting for player...</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Countdown / Status */}
+      {canStart && countdown !== null && (
+        <div style={{
+          textAlign: "center", marginBottom: 20,
+          padding: "14px 16px", borderRadius: 14,
+          background: "rgba(74,222,128,0.08)",
+          border: "1px solid rgba(74,222,128,0.2)",
+        }}>
+          <div style={{
+            fontFamily: "'DM Mono', monospace", fontSize: 11,
+            color: "#4ade80", marginBottom: 4,
+          }}>GAME STARTING IN</div>
+          <div style={{
+            fontFamily: "'Fredoka', sans-serif", fontSize: 36, fontWeight: 700,
+            color: countdown <= 10 ? "#E8443A" : "#fff",
+            transition: "color 0.3s",
+          }}>{countdown}s</div>
+          <div style={{
+            marginTop: 8, height: 4, background: "rgba(255,255,255,0.06)",
+            borderRadius: 2, overflow: "hidden",
+          }}>
+            <div style={{
+              height: "100%", borderRadius: 2,
+              background: countdown <= 10
+                ? "linear-gradient(90deg, #E8443A, #FF6B61)"
+                : "linear-gradient(90deg, #4ade80, #22c55e)",
+              width: `${(countdown / LOBBY_COUNTDOWN) * 100}%`,
+              transition: "width 1s linear",
+            }} />
+          </div>
+        </div>
+      )}
+
+      {!canStart && (
+        <div style={{
+          textAlign: "center", marginBottom: 20,
+          padding: "14px 16px", borderRadius: 14,
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.06)",
+        }}>
+          <div style={{
+            fontFamily: "'DM Mono', monospace", fontSize: 12, color: "#666",
+          }}>
+            ⏳ Need at least <strong style={{ color: "#ccc" }}>{MIN_PLAYERS} players</strong> to start
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 10 }}>
+        {isHost && canStart && (
+          <button onClick={onStart} style={{ ...btnPrimary, flex: 2 }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.03)"}
+            onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+          >Start Now 🚀</button>
+        )}
+        <button onClick={onLeave} style={{ ...btnSecondary, flex: 1 }}>Leave</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Player's Own Grid (only their card visible) ───
+function MyGrid({ player, phase, onCellClick, onRandomFill, theme, playerName, playerAvatar, isMyTurn }) {
   const { grid, marked, manualNext } = player;
   const { count: seqCount, completed } = checkSequences(marked);
   const completedCells = new Set(completed.flat());
@@ -223,141 +376,324 @@ function PlayerGrid({ player, isActive, phase, onCellClick, onRandomFill, theme,
 
   return (
     <div style={{
-      background: "rgba(255,255,255,0.04)", borderRadius: 20, padding: "18px 16px 16px",
-      border: `2.5px solid ${isCurrentTurn && phase === PHASES.PLAY ? theme.color : "rgba(255,255,255,0.06)"}`,
-      boxShadow: isCurrentTurn && phase === PHASES.PLAY
-        ? `0 0 24px ${theme.glow}, 0 8px 32px rgba(0,0,0,0.2)`
-        : "0 4px 20px rgba(0,0,0,0.15)",
-      transition: "all 0.35s cubic-bezier(.4,0,.2,1)",
-      minWidth: 240, maxWidth: 320, flex: "1 1 270px",
+      background: "rgba(255,255,255,0.04)", borderRadius: 24,
+      padding: "22px 20px 20px",
+      border: `2.5px solid ${isMyTurn && phase === PHASES.PLAY ? theme.color : "rgba(255,255,255,0.08)"}`,
+      boxShadow: isMyTurn && phase === PHASES.PLAY
+        ? `0 0 30px ${theme.glow}, 0 12px 40px rgba(0,0,0,0.25)`
+        : "0 8px 32px rgba(0,0,0,0.2)",
+      transition: "all 0.4s cubic-bezier(.4,0,.2,1)",
+      maxWidth: 400, width: "100%", margin: "0 auto",
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-          <span style={{ fontSize: 18 }}>{playerAvatar}</span>
-          <span style={{
-            fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 13,
-            color: "#eee", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-          }}>{playerName}</span>
-          {winner && (
-            <span style={{
-              fontSize: 10, fontWeight: 700, color: "#fff",
-              background: "linear-gradient(135deg, #FFD700, #FFA500)",
-              padding: "2px 7px", borderRadius: 6, fontFamily: "'DM Mono', monospace",
-            }}>WINNER</span>
-          )}
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 16,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 12,
+            background: `linear-gradient(135deg, ${theme.color}, ${theme.accent})`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 22,
+          }}>{playerAvatar}</div>
+          <div>
+            <div style={{
+              fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 15, color: "#eee",
+            }}>{playerName}</div>
+            <div style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#555",
+            }}>
+              {phase === PHASES.PLAY ? `${seqCount}/5 sequences` : "Your card"}
+            </div>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 2 }}>
+        <div style={{ display: "flex", gap: 4 }}>
           {BINGO_LETTERS.map((letter, i) => (
             <span key={letter} style={{
-              fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 16,
-              color: i < bingoCount ? theme.color : "#444",
-              textShadow: i < bingoCount ? `0 0 10px ${theme.glow}` : "none",
+              fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 22,
+              color: i < bingoCount ? theme.color : "#333",
+              textShadow: i < bingoCount ? `0 0 12px ${theme.glow}` : "none",
               transition: "all 0.4s",
-              transform: i < bingoCount ? "scale(1.15)" : "scale(1)",
+              transform: i < bingoCount ? "scale(1.2)" : "scale(1)",
               display: "inline-block",
             }}>{letter}</span>
           ))}
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`, gap: 3, aspectRatio: "1" }}>
+      {/* Grid */}
+      <div style={{
+        display: "grid", gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
+        gap: 5, maxWidth: 340, margin: "0 auto",
+      }}>
         {Array.from({ length: TOTAL_CELLS }).map((_, idx) => {
           const val = grid[idx];
           const isMarked = marked[idx];
           const isCompleted = completedCells.has(idx);
-          const canClickInit = phase === PHASES.INIT && isActive && val === null;
-          const canClickPlay = phase === PHASES.PLAY && isCurrentTurn && val !== null && !isMarked;
+          const canClickInit = phase === PHASES.INIT && val === null;
+          const canClickPlay = phase === PHASES.PLAY && isMyTurn && val !== null && !isMarked;
           const clickable = canClickInit || canClickPlay;
 
           return (
             <button key={idx} onClick={() => clickable && onCellClick(idx)} style={{
-              aspectRatio: "1", border: "none", borderRadius: 7,
-              fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 14,
+              aspectRatio: "1", border: "none", borderRadius: 10,
+              fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 17,
               cursor: clickable ? "pointer" : "default",
               transition: "all 0.2s cubic-bezier(.4,0,.2,1)",
               background: isCompleted
                 ? `linear-gradient(135deg, ${theme.color}, ${theme.accent})`
                 : isMarked ? `${theme.color}20` : val !== null ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.02)",
-              color: isCompleted ? "#fff" : isMarked ? theme.color : val !== null ? "#ccc" : "#444",
-              boxShadow: isCompleted ? `0 2px 8px ${theme.glow}` : isMarked ? `inset 0 0 0 2px ${theme.accent}40` : "inset 0 0 0 1px rgba(255,255,255,0.06)",
-              outline: canClickInit ? `2px dashed ${theme.accent}60` : "none",
+              color: isCompleted ? "#fff" : isMarked ? theme.color : val !== null ? "#ccc" : "#333",
+              boxShadow: isCompleted ? `0 3px 12px ${theme.glow}` : isMarked ? `inset 0 0 0 2px ${theme.accent}40` : "inset 0 0 0 1px rgba(255,255,255,0.06)",
+              outline: canClickInit ? `2px dashed ${theme.accent}50` : "none",
               outlineOffset: -2,
             }}
-            onMouseEnter={(e) => { if (clickable) { e.currentTarget.style.transform = "scale(1.08)"; e.currentTarget.style.boxShadow = `0 4px 14px ${theme.glow}`; }}}
-            onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = isCompleted ? `0 2px 8px ${theme.glow}` : isMarked ? `inset 0 0 0 2px ${theme.accent}40` : "inset 0 0 0 1px rgba(255,255,255,0.06)"; }}
+              onMouseEnter={(e) => { if (clickable) { e.currentTarget.style.transform = "scale(1.1)"; e.currentTarget.style.boxShadow = `0 6px 20px ${theme.glow}`; } }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = isCompleted ? `0 3px 12px ${theme.glow}` : isMarked ? `inset 0 0 0 2px ${theme.accent}40` : "inset 0 0 0 1px rgba(255,255,255,0.06)"; }}
             >
-              {val !== null ? val : phase === PHASES.INIT && isActive ? manualNext : ""}
+              {val !== null ? val : phase === PHASES.INIT ? manualNext : ""}
             </button>
           );
         })}
       </div>
 
-      {phase === PHASES.INIT && isActive && (
-        <div style={{ marginTop: 10, display: "flex", gap: 6 }}>
+      {/* Init controls */}
+      {phase === PHASES.INIT && (
+        <div style={{ marginTop: 14, display: "flex", gap: 8, maxWidth: 340, margin: "14px auto 0" }}>
           <button onClick={onRandomFill} style={{
-            flex: 1, padding: "7px 0", borderRadius: 10, border: "none",
+            flex: 1, padding: "10px 0", borderRadius: 12, border: "none",
             background: `linear-gradient(135deg, ${theme.color}, ${theme.accent})`,
-            color: "#fff", fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 11, cursor: "pointer",
-          }}>🎲 Random Fill</button>
+            color: "#fff", fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 13, cursor: "pointer",
+            transition: "transform 0.2s",
+          }}
+            onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.03)"}
+            onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+          >🎲 Random Fill</button>
           <div style={{
-            padding: "7px 10px", borderRadius: 10, background: `${theme.color}15`,
-            color: theme.color, fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 10,
+            padding: "10px 14px", borderRadius: 12, background: `${theme.color}15`,
+            color: theme.color, fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 12,
             display: "flex", alignItems: "center",
-          }}>Next: {manualNext}</div>
+          }}>Next: {manualNext <= TOTAL_CELLS ? manualNext : "✓"}</div>
         </div>
-      )}
-
-      {phase === PHASES.PLAY && (
-        <div style={{
-          marginTop: 8, textAlign: "center",
-          fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#555", fontWeight: 600,
-        }}>{seqCount} / 5 sequences</div>
       )}
     </div>
   );
 }
 
+// ─── Opponent Summary Card (hidden numbers) ───
+function OpponentCard({ name, avatar, theme, marked, isCurrentTurn, phase, winner }) {
+  const { count: seqCount } = checkSequences(marked);
+  const bingoCount = Math.min(seqCount, 5);
+
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.03)", borderRadius: 16,
+      padding: "12px 14px",
+      border: `2px solid ${isCurrentTurn && phase === PHASES.PLAY ? theme.color : "rgba(255,255,255,0.06)"}`,
+      boxShadow: isCurrentTurn ? `0 0 16px ${theme.glow}` : "none",
+      transition: "all 0.3s",
+      flex: "1 1 160px", minWidth: 150, maxWidth: 220,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: 8,
+          background: `linear-gradient(135deg, ${theme.color}, ${theme.accent})`,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 15,
+        }}>{avatar}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: 12,
+            color: "#ddd", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {name}
+            {winner && <span style={{
+              fontSize: 9, color: "#fff", marginLeft: 6,
+              background: "linear-gradient(135deg, #FFD700, #FFA500)",
+              padding: "1px 5px", borderRadius: 4,
+            }}>WIN</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Mini BINGO letters */}
+      <div style={{ display: "flex", gap: 3, marginBottom: 8, justifyContent: "center" }}>
+        {BINGO_LETTERS.map((letter, i) => (
+          <span key={letter} style={{
+            fontFamily: "'Fredoka', sans-serif", fontWeight: 700, fontSize: 14,
+            color: i < bingoCount ? theme.color : "#333",
+            textShadow: i < bingoCount ? `0 0 8px ${theme.glow}` : "none",
+          }}>{letter}</span>
+        ))}
+      </div>
+
+      {/* Mini grid showing only marked status, not numbers */}
+      <div style={{
+        display: "grid", gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
+        gap: 2,
+      }}>
+        {marked.map((isMarked, idx) => (
+          <div key={idx} style={{
+            aspectRatio: "1", borderRadius: 3,
+            background: isMarked
+              ? `linear-gradient(135deg, ${theme.color}, ${theme.accent})`
+              : "rgba(255,255,255,0.04)",
+            transition: "background 0.3s",
+          }} />
+        ))}
+      </div>
+
+      <div style={{
+        textAlign: "center", marginTop: 6,
+        fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#444",
+      }}>{seqCount}/5 sequences</div>
+    </div>
+  );
+}
+
+// ─── Main Game ───
 export default function BingoGame() {
   const { profile, updateProfile, loading } = usePersistedProfile();
-  const [phase, setPhase] = useState(PHASES.LOBBY);
-  const [numPlayers, setNumPlayers] = useState(2);
-  const [playerNames, setPlayerNames] = useState(["", "Guest 2", "Guest 3", "Guest 4"]);
-  const [playerAvatars, setPlayerAvatars] = useState(["🎯", "🎲", "🃏", "🏆"]);
-  const [players, setPlayers] = useState([]);
+  const [phase, setPhase] = useState(PHASES.HOME);
+  const [room, setRoom] = useState(null); // { code, players: [{id, name, avatar}], hostId }
+  const [myPlayerIndex, setMyPlayerIndex] = useState(0);
+  const [players, setPlayers] = useState([]); // game state per player
   const [currentTurn, setCurrentTurn] = useState(0);
   const [initTimer, setInitTimer] = useState(INIT_TIME);
-  const [currentInitPlayer, setCurrentInitPlayer] = useState(0);
+  const [lobbyCountdown, setLobbyCountdown] = useState(null);
   const [winnerId, setWinnerId] = useState(null);
   const [lastCalledNumber, setLastCalledNumber] = useState(null);
   const [moveHistory, setMoveHistory] = useState([]);
+  const [joinCode, setJoinCode] = useState("");
+  const [simBotCount, setSimBotCount] = useState(1);
   const timerRef = useRef(null);
+  const lobbyTimerRef = useRef(null);
 
+  // Show profile editor if no profile
   useEffect(() => {
-    if (profile?.name) {
-      setPlayerNames((prev) => { const n = [...prev]; n[0] = profile.name; return n; });
-      setPlayerAvatars((prev) => { const a = [...prev]; a[0] = profile.avatar || "🎯"; return a; });
-    }
-  }, [profile]);
-
-  useEffect(() => {
-    if (!loading && !profile?.name && phase === PHASES.LOBBY) setPhase(PHASES.PROFILE);
+    if (!loading && !profile?.name && phase === PHASES.HOME) setPhase(PHASES.PROFILE);
   }, [loading, profile, phase]);
 
-  const initializePlayers = (count) =>
-    Array.from({ length: count }, () => ({
-      grid: createEmptyGrid(), marked: Array(TOTAL_CELLS).fill(false), manualNext: 1, placed: new Set(),
-    }));
+  // ─── Room Management ───
+  const createRoom = () => {
+    const code = generateRoomCode();
+    const me = { id: profile.id, name: profile.name, avatar: profile.avatar };
+    setRoom({ code, players: [me], hostId: profile.id });
+    setMyPlayerIndex(0);
+    setPhase(PHASES.LOBBY_WAIT);
+    setLobbyCountdown(null);
+  };
 
-  const startGame = () => {
-    setPlayers(initializePlayers(numPlayers));
-    setCurrentInitPlayer(0);
-    setPhase(PHASES.INIT);
-    setInitTimer(INIT_TIME);
+  const addBot = () => {
+    if (!room || room.players.length >= MAX_PLAYERS) return;
+    const botNames = ["Bot Alpha", "Bot Beta", "Bot Gamma"];
+    const botAvatars = ["🤖", "🧠", "👾"];
+    const botIdx = room.players.length - 1;
+    const bot = {
+      id: `bot_${Date.now()}`,
+      name: botNames[botIdx] || `Bot ${botIdx + 1}`,
+      avatar: botAvatars[botIdx] || "🤖",
+      isBot: true,
+    };
+    setRoom((prev) => {
+      const updated = { ...prev, players: [...prev.players, bot] };
+      // Start countdown when 2nd player joins
+      if (updated.players.length === MIN_PLAYERS && lobbyCountdown === null) {
+        setLobbyCountdown(LOBBY_COUNTDOWN);
+      }
+      return updated;
+    });
+  };
+
+  // Simulated join (for local play — in production this would be Firebase/WebSocket)
+  const joinRoom = (code) => {
+    // In local mode, we simulate joining by adding ourselves to the existing room
+    // In production, this would query Firebase for the room
+    if (!room || room.code !== code.toUpperCase()) {
+      alert("Room not found. In this local version, one player creates a room and adds bots. For real online multiplayer, deploy with Firebase.");
+      return;
+    }
+    if (room.players.length >= MAX_PLAYERS) {
+      alert("Room is full!");
+      return;
+    }
+  };
+
+  // Lobby countdown — auto-start after 60s once 2+ players
+  useEffect(() => {
+    if (phase !== PHASES.LOBBY_WAIT || lobbyCountdown === null) return;
+
+    lobbyTimerRef.current = setInterval(() => {
+      setLobbyCountdown((t) => {
+        if (t <= 1) {
+          clearInterval(lobbyTimerRef.current);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(lobbyTimerRef.current);
+  }, [phase, lobbyCountdown !== null]);
+
+  // Auto-start when countdown hits 0
+  useEffect(() => {
+    if (lobbyCountdown === 0 && phase === PHASES.LOBBY_WAIT && room?.players.length >= MIN_PLAYERS) {
+      startGameFromLobby();
+    }
+  }, [lobbyCountdown]);
+
+  const startGameFromLobby = () => {
+    if (!room || room.players.length < MIN_PLAYERS) return;
+    clearInterval(lobbyTimerRef.current);
+    const numP = room.players.length;
+    setPlayers(Array.from({ length: numP }, () => ({
+      grid: createEmptyGrid(), marked: Array(TOTAL_CELLS).fill(false),
+      manualNext: 1, placed: new Set(), ready: false,
+    })));
     setCurrentTurn(0);
+    setInitTimer(INIT_TIME);
     setWinnerId(null);
     setLastCalledNumber(null);
     setMoveHistory([]);
+    setPhase(PHASES.INIT);
+
+    // Auto-fill bot grids immediately
+    setTimeout(() => {
+      setPlayers((prev) => {
+        return prev.map((p, idx) => {
+          if (room.players[idx]?.isBot) {
+            const shuffled = Array.from({ length: TOTAL_CELLS }, (_, i) => i + 1);
+            for (let i = shuffled.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            return { ...p, grid: shuffled, manualNext: TOTAL_CELLS + 1, placed: new Set(shuffled), ready: true };
+          }
+          return p;
+        });
+      });
+    }, 100);
   };
+
+  // Init timer for player's own grid
+  useEffect(() => {
+    if (phase !== PHASES.INIT) return;
+    timerRef.current = setInterval(() => {
+      setInitTimer((t) => {
+        if (t <= 1) {
+          clearInterval(timerRef.current);
+          // Auto-fill my grid
+          autoFillPlayer(myPlayerIndex);
+          setTimeout(() => setPhase(PHASES.PLAY), 500);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [phase, myPlayerIndex]);
 
   const autoFillPlayer = useCallback((playerIdx) => {
     setPlayers((prev) => {
@@ -376,49 +712,22 @@ export default function BingoGame() {
       p.grid = newGrid;
       p.manualNext = TOTAL_CELLS + 1;
       p.placed = new Set(Array.from({ length: TOTAL_CELLS }, (_, i) => i + 1));
+      p.ready = true;
       next[playerIdx] = p;
       return next;
     });
   }, []);
 
-  useEffect(() => {
-    if (phase !== PHASES.INIT) return;
-    timerRef.current = setInterval(() => {
-      setInitTimer((t) => {
-        if (t <= 1) {
-          autoFillPlayer(currentInitPlayer);
-          if (currentInitPlayer < numPlayers - 1) {
-            setCurrentInitPlayer((p) => p + 1);
-            return INIT_TIME;
-          } else {
-            clearInterval(timerRef.current);
-            setPhase(PHASES.PLAY);
-            return 0;
-          }
-        }
-        return t - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timerRef.current);
-  }, [phase, currentInitPlayer, numPlayers, autoFillPlayer]);
-
-  const handleRandomFill = (playerIdx) => {
-    if (playerIdx !== currentInitPlayer) return;
-    autoFillPlayer(playerIdx);
-    if (currentInitPlayer < numPlayers - 1) {
-      setCurrentInitPlayer((p) => p + 1);
-      setInitTimer(INIT_TIME);
-    } else {
-      clearInterval(timerRef.current);
-      setPhase(PHASES.PLAY);
-    }
+  const handleRandomFill = () => {
+    autoFillPlayer(myPlayerIndex);
+    clearInterval(timerRef.current);
+    setTimeout(() => setPhase(PHASES.PLAY), 500);
   };
 
-  const handleInitCellClick = (playerIdx, cellIdx) => {
-    if (playerIdx !== currentInitPlayer) return;
+  const handleInitCellClick = (cellIdx) => {
     setPlayers((prev) => {
       const next = [...prev];
-      const p = { ...next[playerIdx] };
+      const p = { ...next[myPlayerIndex] };
       if (p.grid[cellIdx] !== null) return prev;
       const newGrid = [...p.grid];
       newGrid[cellIdx] = p.manualNext;
@@ -427,29 +736,84 @@ export default function BingoGame() {
       p.grid = newGrid;
       p.manualNext = p.manualNext + 1;
       p.placed = newPlaced;
-      next[playerIdx] = p;
+      next[myPlayerIndex] = p;
+
       if (p.manualNext > TOTAL_CELLS) {
-        setTimeout(() => {
-          if (currentInitPlayer < numPlayers - 1) {
-            setCurrentInitPlayer((cp) => cp + 1);
-            setInitTimer(INIT_TIME);
-          } else {
-            clearInterval(timerRef.current);
-            setPhase(PHASES.PLAY);
-          }
-        }, 200);
+        p.ready = true;
+        clearInterval(timerRef.current);
+        setTimeout(() => setPhase(PHASES.PLAY), 500);
       }
       return next;
     });
   };
 
-  const handlePlayCellClick = (playerIdx, cellIdx) => {
-    if (playerIdx !== currentTurn || phase !== PHASES.PLAY || winnerId !== null) return;
-    const number = players[playerIdx].grid[cellIdx];
-    if (number === null || players[playerIdx].marked[cellIdx]) return;
+  // Bot turn logic
+  const executeBotTurn = useCallback((botIdx) => {
+    setTimeout(() => {
+      setPlayers((prev) => {
+        const bot = prev[botIdx];
+        // Find unmarked cells
+        const unmarked = [];
+        for (let i = 0; i < TOTAL_CELLS; i++) {
+          if (!bot.marked[i] && bot.grid[i] !== null) unmarked.push(i);
+        }
+        if (unmarked.length === 0) return prev;
+        const chosen = unmarked[Math.floor(Math.random() * unmarked.length)];
+        const number = bot.grid[chosen];
+
+        setLastCalledNumber(number);
+        setMoveHistory((h) => [...h, { player: botIdx, number }]);
+
+        // Mark on all grids
+        const next = prev.map((p) => {
+          const newMarked = [...p.marked];
+          for (let i = 0; i < TOTAL_CELLS; i++) if (p.grid[i] === number) newMarked[i] = true;
+          return { ...p, marked: newMarked };
+        });
+
+        // Check for winner
+        setTimeout(() => {
+          for (let i = 0; i < next.length; i++) {
+            const { count } = checkSequences(next[i].marked);
+            if (count >= 5) {
+              setWinnerId(i);
+              setPhase(PHASES.GAMEOVER);
+              const mySeq = checkSequences(next[myPlayerIndex].marked).count;
+              updateProfile((pr) => ({
+                ...pr,
+                gamesPlayed: pr.gamesPlayed + 1,
+                gamesWon: i === myPlayerIndex ? pr.gamesWon + 1 : pr.gamesWon,
+                winStreak: i === myPlayerIndex ? pr.winStreak + 1 : 0,
+                bestStreak: i === myPlayerIndex ? Math.max(pr.bestStreak, pr.winStreak + 1) : pr.bestStreak,
+                totalSequences: pr.totalSequences + mySeq,
+              }));
+              return;
+            }
+          }
+          setCurrentTurn((t) => (t + 1) % room.players.length);
+        }, 150);
+
+        return next;
+      });
+    }, 800 + Math.random() * 1200); // Simulate thinking time
+  }, [room, myPlayerIndex, updateProfile]);
+
+  // Trigger bot turns
+  useEffect(() => {
+    if (phase !== PHASES.PLAY || winnerId !== null || !room) return;
+    if (room.players[currentTurn]?.isBot) {
+      executeBotTurn(currentTurn);
+    }
+  }, [currentTurn, phase, winnerId, room, executeBotTurn]);
+
+  const handlePlayCellClick = (cellIdx) => {
+    if (currentTurn !== myPlayerIndex || phase !== PHASES.PLAY || winnerId !== null) return;
+    const myPlayer = players[myPlayerIndex];
+    const number = myPlayer.grid[cellIdx];
+    if (number === null || myPlayer.marked[cellIdx]) return;
 
     setLastCalledNumber(number);
-    setMoveHistory((h) => [...h, { player: playerIdx, number }]);
+    setMoveHistory((h) => [...h, { player: myPlayerIndex, number }]);
 
     setPlayers((prev) => {
       const next = prev.map((p) => {
@@ -464,27 +828,39 @@ export default function BingoGame() {
           if (count >= 5) {
             setWinnerId(i);
             setPhase(PHASES.GAMEOVER);
-            const totalSeq = checkSequences(next[0].marked).count;
-            updateProfile((p) => ({
-              ...p,
-              gamesPlayed: p.gamesPlayed + 1,
-              gamesWon: i === 0 ? p.gamesWon + 1 : p.gamesWon,
-              winStreak: i === 0 ? p.winStreak + 1 : 0,
-              bestStreak: i === 0 ? Math.max(p.bestStreak, p.winStreak + 1) : p.bestStreak,
-              totalSequences: p.totalSequences + totalSeq,
+            const mySeq = checkSequences(next[myPlayerIndex].marked).count;
+            updateProfile((pr) => ({
+              ...pr,
+              gamesPlayed: pr.gamesPlayed + 1,
+              gamesWon: i === myPlayerIndex ? pr.gamesWon + 1 : pr.gamesWon,
+              winStreak: i === myPlayerIndex ? pr.winStreak + 1 : 0,
+              bestStreak: i === myPlayerIndex ? Math.max(pr.bestStreak, pr.winStreak + 1) : pr.bestStreak,
+              totalSequences: pr.totalSequences + mySeq,
             }));
             return;
           }
         }
-        setCurrentTurn((t) => (t + 1) % numPlayers);
-      }, 100);
+        setCurrentTurn((t) => (t + 1) % room.players.length);
+      }, 150);
+
       return next;
     });
   };
 
-  const handleCellClick = (playerIdx, cellIdx) => {
-    if (phase === PHASES.INIT) handleInitCellClick(playerIdx, cellIdx);
-    else if (phase === PHASES.PLAY) handlePlayCellClick(playerIdx, cellIdx);
+  const handleCellClick = (cellIdx) => {
+    if (phase === PHASES.INIT) handleInitCellClick(cellIdx);
+    else if (phase === PHASES.PLAY) handlePlayCellClick(cellIdx);
+  };
+
+  const goHome = () => {
+    setPhase(PHASES.HOME);
+    setRoom(null);
+    setPlayers([]);
+    setWinnerId(null);
+    setLobbyCountdown(null);
+    setMoveHistory([]);
+    clearInterval(timerRef.current);
+    clearInterval(lobbyTimerRef.current);
   };
 
   if (loading) {
@@ -494,7 +870,7 @@ export default function BingoGame() {
         background: "linear-gradient(160deg, #0d0d1a 0%, #1a1a2e 50%, #0d0d1a 100%)",
       }}>
         <div style={{
-          fontFamily: "'Fredoka', sans-serif", fontSize: 32,
+          fontFamily: "'Fredoka', sans-serif", fontSize: 36,
           background: "linear-gradient(135deg, #E8443A, #2D7DD2, #1B9C85, #F39237)",
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
           animation: "pulse 1.5s infinite",
@@ -516,7 +892,7 @@ export default function BingoGame() {
         display: "flex", alignItems: "center", justifyContent: "space-between",
         maxWidth: 900, margin: "0 auto 20px", padding: "0 4px",
       }}>
-        <h1 onClick={() => phase !== PHASES.INIT && phase !== PHASES.PLAY && setPhase(PHASES.LOBBY)} style={{
+        <h1 onClick={goHome} style={{
           fontFamily: "'Fredoka', sans-serif", fontSize: 32, fontWeight: 700,
           background: "linear-gradient(135deg, #E8443A, #FF6B61, #F39237)",
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
@@ -528,7 +904,6 @@ export default function BingoGame() {
               background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)",
               borderRadius: 10, padding: "6px 12px", cursor: "pointer",
               fontFamily: "'DM Mono', monospace", fontSize: 11, color: "#ccc",
-              display: "flex", alignItems: "center", gap: 6,
             }}>📊 Stats</button>
             <button onClick={() => setPhase(PHASES.PROFILE)} style={{
               background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)",
@@ -542,270 +917,328 @@ export default function BingoGame() {
         )}
       </div>
 
+      {/* ─── Profile ─── */}
       {phase === PHASES.PROFILE && (
-        <ProfileEditor profile={profile} onSave={(p) => { updateProfile(p); setPhase(PHASES.LOBBY); }} />
+        <ProfileEditor profile={profile} onSave={(p) => { updateProfile(p); setPhase(PHASES.HOME); }} />
       )}
 
-      {phase === PHASES.STATS && (
-        <StatsPanel profile={profile} onBack={() => setPhase(PHASES.LOBBY)} />
-      )}
+      {/* ─── Stats ─── */}
+      {phase === PHASES.STATS && <StatsPanel profile={profile} onBack={() => setPhase(PHASES.HOME)} />}
 
-      {/* Lobby */}
-      {phase === PHASES.LOBBY && (
-        <div style={{
-          maxWidth: 480, margin: "40px auto", background: "rgba(255,255,255,0.04)",
-          borderRadius: 28, padding: "36px 28px",
-          border: "1px solid rgba(255,255,255,0.08)",
-          boxShadow: "0 12px 48px rgba(0,0,0,0.3)",
-        }}>
-          <h2 style={{
-            fontFamily: "'Fredoka', sans-serif", fontSize: 22,
-            color: "#fff", margin: "0 0 6px", textAlign: "center",
-          }}>New Game</h2>
-          <p style={{
-            fontFamily: "'DM Mono', monospace", fontSize: 11,
-            color: "#555", textAlign: "center", margin: "0 0 28px",
-          }}>Local multiplayer — pass the device between turns</p>
+      {/* ─── Home ─── */}
+      {phase === PHASES.HOME && (
+        <div style={{ maxWidth: 420, margin: "40px auto", ...cardStyle, padding: "40px 32px" }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <div style={{ fontSize: 56, marginBottom: 12 }}>🎯</div>
+            <h2 style={{
+              fontFamily: "'Fredoka', sans-serif", fontSize: 26, color: "#fff", margin: "0 0 6px",
+            }}>Ready to play?</h2>
+            <p style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 12, color: "#555",
+            }}>Create a room or join an existing one</p>
+          </div>
 
-          <div style={{ marginBottom: 24 }}>
-            <label style={{
-              fontFamily: "'DM Mono', monospace", fontSize: 11,
-              color: "#555", letterSpacing: "0.1em", display: "block", marginBottom: 10,
-            }}>NUMBER OF PLAYERS</label>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-              {[2, 3, 4].map((n) => (
-                <button key={n} onClick={() => setNumPlayers(n)} style={{
-                  width: 52, height: 52, borderRadius: 14, border: "none",
-                  background: numPlayers === n ? "linear-gradient(135deg, #E8443A, #FF6B61)" : "rgba(255,255,255,0.06)",
-                  color: numPlayers === n ? "#fff" : "#888",
-                  fontFamily: "'Fredoka', sans-serif", fontSize: 22, fontWeight: 700, cursor: "pointer",
-                  boxShadow: numPlayers === n ? "0 4px 16px rgba(232,68,58,0.3)" : "none",
-                  transition: "all 0.2s",
-                }}>{n}</button>
-              ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <button onClick={createRoom} style={btnPrimary}
+              onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.03)"}
+              onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+            >Create Room 🏠</button>
+
+            <div style={{
+              display: "flex", alignItems: "center", gap: 12, margin: "4px 0",
+            }}>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+              <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "#444" }}>or</span>
+              <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.08)" }} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="text" value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 5))}
+                placeholder="ROOM CODE"
+                style={{ ...inputStyle, flex: 1, textAlign: "center", letterSpacing: "0.2em", fontSize: 18 }}
+              />
+              <button onClick={() => joinRoom(joinCode)} disabled={joinCode.length < 5}
+                style={{
+                  ...btnSecondary, width: "auto", padding: "12px 20px",
+                  opacity: joinCode.length >= 5 ? 1 : 0.4,
+                }}>Join</button>
             </div>
           </div>
 
-          <div style={{ marginBottom: 28 }}>
-            <label style={{
-              fontFamily: "'DM Mono', monospace", fontSize: 11,
-              color: "#555", letterSpacing: "0.1em", display: "block", marginBottom: 10,
-            }}>PLAYER NAMES</label>
-            {Array.from({ length: numPlayers }).map((_, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <div style={{
-                  width: 28, height: 28, borderRadius: 8,
-                  background: PLAYER_THEMES[i].color, display: "flex",
-                  alignItems: "center", justifyContent: "center", fontSize: 14, flexShrink: 0,
-                }}>{playerAvatars[i]}</div>
-                <input type="text" value={playerNames[i]}
-                  onChange={(e) => { const names = [...playerNames]; names[i] = e.target.value.slice(0, 20); setPlayerNames(names); }}
-                  disabled={i === 0} placeholder={`Player ${i + 1}`}
-                  style={{
-                    flex: 1, padding: "8px 12px", borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    background: i === 0 ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.06)",
-                    fontFamily: "'DM Mono', monospace", fontSize: 13,
-                    color: i === 0 ? "#666" : "#fff", outline: "none",
-                  }}
-                />
-                {i === 0 && (
-                  <span style={{
-                    fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#444",
-                    padding: "3px 6px", background: "rgba(255,255,255,0.04)", borderRadius: 6,
-                  }}>YOU</span>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <button onClick={startGame} style={{
-            width: "100%", padding: "14px", borderRadius: 14, border: "none",
-            background: "linear-gradient(135deg, #E8443A, #FF6B61)",
-            color: "#fff", fontFamily: "'Fredoka', sans-serif", fontSize: 18, fontWeight: 700, cursor: "pointer",
-            boxShadow: "0 4px 20px rgba(232,68,58,0.4)", transition: "transform 0.2s",
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.03)"}
-          onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
-          >Start Game 🎯</button>
-
-          {/* Deployment Guide */}
           <div style={{
-            marginTop: 24, padding: "18px 16px",
-            background: "rgba(255,255,255,0.02)", borderRadius: 16,
-            border: "1px solid rgba(255,255,255,0.05)",
-          }}>
-            <h3 style={{
-              fontFamily: "'Fredoka', sans-serif", fontSize: 14, color: "#888", margin: "0 0 12px",
-            }}>🚀 Deploy & Go Online</h3>
-            {[
-              { t: "Web", c: "#1B9C85", d: "Deploy to Vercel/Netlify. Add Firebase for Google auth + Firestore for real-time multiplayer." },
-              { t: "Mobile", c: "#2D7DD2", d: "Wrap with Capacitor.js → Android ($25) & iOS ($99/yr). Or rebuild in React Native + Expo." },
-              { t: "Online Rooms", c: "#F39237", d: "Firebase Realtime DB or Supabase Realtime for game sync. Players join rooms with codes." },
-              { t: "Google Sign-In", c: "#E8443A", d: "Firebase Auth + Google provider. ~30 min setup. Store profiles & stats in Firestore." },
-            ].map((item) => (
-              <div key={item.t} style={{
-                marginBottom: 8, padding: "10px 12px",
-                background: `${item.c}08`, borderRadius: 10, borderLeft: `3px solid ${item.c}`,
-              }}>
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: item.c, fontWeight: 500 }}>
-                  {item.t}
-                </span>
-                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "#666", marginLeft: 8 }}>
-                  {item.d}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Init Phase Banner */}
-      {phase === PHASES.INIT && (
-        <div style={{
-          textAlign: "center", marginBottom: 18,
-          background: "rgba(255,255,255,0.05)", borderRadius: 16,
-          padding: "14px 20px", maxWidth: 500, margin: "0 auto 18px",
-          border: "1px solid rgba(255,255,255,0.08)",
-        }}>
-          <div style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 15, color: "#fff" }}>
-            <span style={{ color: PLAYER_THEMES[currentInitPlayer].color }}>
-              {playerNames[currentInitPlayer] || `Player ${currentInitPlayer + 1}`}
-            </span> — Fill your grid!
-          </div>
-          <div style={{
-            fontFamily: "'DM Mono', monospace", fontSize: 32, fontWeight: 700,
-            color: initTimer <= 10 ? "#E8443A" : "#fff", margin: "4px 0",
-          }}>{initTimer}s</div>
-          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#555" }}>
-            Click cells sequentially or use Random Fill
-          </div>
-          <div style={{
-            marginTop: 10, height: 4, background: "rgba(255,255,255,0.06)",
-            borderRadius: 2, overflow: "hidden",
+            marginTop: 24, padding: "12px 14px", borderRadius: 12,
+            background: "rgba(45,125,210,0.06)", border: "1px solid rgba(45,125,210,0.12)",
           }}>
             <div style={{
-              height: "100%", borderRadius: 2,
-              background: initTimer <= 10
-                ? "linear-gradient(90deg, #E8443A, #FF6B61)"
-                : `linear-gradient(90deg, ${PLAYER_THEMES[currentInitPlayer].color}, ${PLAYER_THEMES[currentInitPlayer].accent})`,
-              width: `${(initTimer / INIT_TIME) * 100}%`,
-              transition: "width 1s linear",
-            }} />
+              fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#5BA4E8",
+            }}>💡 This is local multiplayer with bots. Deploy with Firebase for real online rooms.</div>
           </div>
         </div>
       )}
 
-      {/* Play Phase Banner */}
-      {phase === PHASES.PLAY && winnerId === null && (
-        <div style={{
-          textAlign: "center", marginBottom: 18,
-          background: "rgba(255,255,255,0.05)", borderRadius: 16,
-          padding: "12px 20px", maxWidth: 500, margin: "0 auto 18px",
-          border: "1px solid rgba(255,255,255,0.08)",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
-        }}>
+      {/* ─── Lobby Wait ─── */}
+      {phase === PHASES.LOBBY_WAIT && room && (
+        <>
+          <LobbyWaitRoom
+            room={room} myId={profile.id}
+            onStart={startGameFromLobby}
+            onLeave={goHome}
+            countdown={lobbyCountdown}
+            isHost={room.hostId === profile.id}
+          />
+          {room.players.length < MAX_PLAYERS && (
+            <div style={{ textAlign: "center", marginTop: 16 }}>
+              <button onClick={addBot} style={{
+                ...btnSecondary, width: "auto", display: "inline-flex",
+                alignItems: "center", gap: 8, padding: "10px 24px",
+              }}>
+                🤖 Add Bot Player
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ─── Init Phase ─── */}
+      {phase === PHASES.INIT && room && players[myPlayerIndex] && (
+        <>
           <div style={{
-            width: 10, height: 10, borderRadius: "50%",
-            background: PLAYER_THEMES[currentTurn].color,
-            boxShadow: `0 0 10px ${PLAYER_THEMES[currentTurn].glow}`,
-            animation: "pulse 1.5s infinite",
-          }} />
-          <div>
-            <span style={{
-              fontFamily: "'Fredoka', sans-serif", fontSize: 15,
-              color: PLAYER_THEMES[currentTurn].color, fontWeight: 700,
-            }}>{playerNames[currentTurn] || `Player ${currentTurn + 1}`}'s turn</span>
+            textAlign: "center", marginBottom: 18,
+            background: "rgba(255,255,255,0.05)", borderRadius: 16,
+            padding: "14px 20px", maxWidth: 420, margin: "0 auto 18px",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}>
+            <div style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 16, color: "#fff" }}>
+              Set up your card!
+            </div>
+            <div style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 36, fontWeight: 700,
+              color: initTimer <= 10 ? "#E8443A" : "#fff", margin: "4px 0",
+            }}>{initTimer}s</div>
+            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#555" }}>
+              Click cells to place numbers or use Random Fill
+            </div>
+            <div style={{
+              marginTop: 10, height: 4, background: "rgba(255,255,255,0.06)",
+              borderRadius: 2, overflow: "hidden",
+            }}>
+              <div style={{
+                height: "100%", borderRadius: 2,
+                background: initTimer <= 10
+                  ? "linear-gradient(90deg, #E8443A, #FF6B61)"
+                  : `linear-gradient(90deg, ${PLAYER_THEMES[myPlayerIndex].color}, ${PLAYER_THEMES[myPlayerIndex].accent})`,
+                width: `${(initTimer / INIT_TIME) * 100}%`,
+                transition: "width 1s linear",
+              }} />
+            </div>
+          </div>
+
+          <MyGrid
+            player={players[myPlayerIndex]}
+            phase={phase}
+            onCellClick={handleCellClick}
+            onRandomFill={handleRandomFill}
+            theme={PLAYER_THEMES[myPlayerIndex]}
+            playerName={room.players[myPlayerIndex].name}
+            playerAvatar={room.players[myPlayerIndex].avatar}
+            isMyTurn={true}
+          />
+        </>
+      )}
+
+      {/* ─── Play Phase ─── */}
+      {phase === PHASES.PLAY && room && players[myPlayerIndex] && (
+        <>
+          {/* Turn banner */}
+          <div style={{
+            textAlign: "center", marginBottom: 16,
+            background: "rgba(255,255,255,0.05)", borderRadius: 16,
+            padding: "12px 20px", maxWidth: 420, margin: "0 auto 16px",
+            border: `1px solid ${currentTurn === myPlayerIndex ? `${PLAYER_THEMES[myPlayerIndex].color}40` : "rgba(255,255,255,0.08)"}`,
+          }}>
+            <div style={{
+              fontFamily: "'Fredoka', sans-serif", fontSize: 16, fontWeight: 700,
+              color: currentTurn === myPlayerIndex ? PLAYER_THEMES[myPlayerIndex].color : "#888",
+            }}>
+              {currentTurn === myPlayerIndex
+                ? "🎯 Your Turn — Pick a number!"
+                : `⏳ ${room.players[currentTurn]?.name}'s turn...`
+              }
+            </div>
             {lastCalledNumber && (
-              <span style={{
-                fontFamily: "'DM Mono', monospace", fontSize: 11,
-                color: "#555", marginLeft: 12,
-              }}>Last: <strong style={{ color: "#ccc" }}>{lastCalledNumber}</strong></span>
+              <div style={{
+                fontFamily: "'DM Mono', monospace", fontSize: 12, color: "#555", marginTop: 4,
+              }}>
+                Last called: <strong style={{
+                  color: PLAYER_THEMES[moveHistory[moveHistory.length - 1]?.player || 0].color,
+                  fontSize: 16,
+                }}>{lastCalledNumber}</strong>
+              </div>
             )}
           </div>
-        </div>
-      )}
 
-      {/* Game Over */}
-      {phase === PHASES.GAMEOVER && winnerId !== null && (
-        <div style={{
-          textAlign: "center", marginBottom: 18,
-          background: "linear-gradient(135deg, rgba(255,215,0,0.12), rgba(255,165,0,0.08))",
-          borderRadius: 16, padding: "20px 24px",
-          maxWidth: 500, margin: "0 auto 18px",
-          border: "1px solid rgba(255,215,0,0.25)",
-        }}>
-          <div style={{ fontSize: 40, marginBottom: 6 }}>🎉</div>
+          {/* My card */}
+          <MyGrid
+            player={players[myPlayerIndex]}
+            phase={phase}
+            onCellClick={handleCellClick}
+            onRandomFill={() => {}}
+            theme={PLAYER_THEMES[myPlayerIndex]}
+            playerName={room.players[myPlayerIndex].name}
+            playerAvatar={room.players[myPlayerIndex].avatar}
+            isMyTurn={currentTurn === myPlayerIndex}
+          />
+
+          {/* Opponents */}
           <div style={{
-            fontFamily: "'Fredoka', sans-serif", fontSize: 24, color: "#FFD700", fontWeight: 700,
-          }}>{playerNames[winnerId] || `Player ${winnerId + 1}`} wins!</div>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 14 }}>
-            <button onClick={startGame} style={{
-              padding: "10px 24px", borderRadius: 10, border: "none",
-              background: "linear-gradient(135deg, #E8443A, #FF6B61)",
-              color: "#fff", fontFamily: "'Fredoka', sans-serif", fontSize: 14, fontWeight: 700, cursor: "pointer",
-            }}>Rematch</button>
-            <button onClick={() => { setPhase(PHASES.LOBBY); setWinnerId(null); }} style={{
-              padding: "10px 24px", borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)",
-              color: "#ccc", fontFamily: "'Fredoka', sans-serif", fontSize: 14, fontWeight: 700, cursor: "pointer",
-            }}>Lobby</button>
+            maxWidth: 600, margin: "20px auto 0",
+          }}>
+            <div style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 10,
+              color: "#444", letterSpacing: "0.1em", marginBottom: 10, textAlign: "center",
+            }}>OPPONENTS</div>
+            <div style={{
+              display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center",
+            }}>
+              {room.players.map((rp, idx) => {
+                if (idx === myPlayerIndex) return null;
+                return (
+                  <OpponentCard key={rp.id}
+                    name={rp.name} avatar={rp.avatar}
+                    theme={PLAYER_THEMES[idx]}
+                    marked={players[idx]?.marked || Array(TOTAL_CELLS).fill(false)}
+                    isCurrentTurn={currentTurn === idx}
+                    phase={phase}
+                    winner={false}
+                  />
+                );
+              })}
+            </div>
           </div>
-        </div>
+
+          {/* Call history */}
+          {moveHistory.length > 0 && (
+            <div style={{
+              maxWidth: 500, margin: "16px auto 0", padding: "12px 16px",
+              background: "rgba(255,255,255,0.03)", borderRadius: 14,
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <div style={{
+                fontFamily: "'DM Mono', monospace", fontSize: 10,
+                color: "#333", marginBottom: 8, letterSpacing: "0.08em",
+              }}>CALL HISTORY</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {moveHistory.map((m, i) => (
+                  <span key={i} style={{
+                    display: "inline-flex", alignItems: "center", gap: 3,
+                    padding: "2px 6px", borderRadius: 5,
+                    background: `${PLAYER_THEMES[m.player].color}12`,
+                    fontFamily: "'DM Mono', monospace", fontSize: 10, fontWeight: 700,
+                    color: PLAYER_THEMES[m.player].color,
+                  }}>
+                    <span style={{
+                      width: 4, height: 4, borderRadius: "50%",
+                      background: PLAYER_THEMES[m.player].color,
+                    }} />
+                    {m.number}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Player Grids */}
-      {(phase === PHASES.INIT || phase === PHASES.PLAY || phase === PHASES.GAMEOVER) && (
-        <div style={{
-          display: "flex", flexWrap: "wrap", gap: 14,
-          justifyContent: "center", maxWidth: 1400, margin: "0 auto",
-        }}>
-          {players.map((player, idx) => (
-            <PlayerGrid key={idx} player={player}
-              isActive={phase === PHASES.INIT && idx === currentInitPlayer}
-              phase={phase} onCellClick={(cellIdx) => handleCellClick(idx, cellIdx)}
-              onRandomFill={() => handleRandomFill(idx)} theme={PLAYER_THEMES[idx]}
-              playerName={playerNames[idx] || `Player ${idx + 1}`}
-              playerAvatar={playerAvatars[idx]}
-              isCurrentTurn={currentTurn === idx} winner={winnerId === idx}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Move History */}
-      {moveHistory.length > 0 && (phase === PHASES.PLAY || phase === PHASES.GAMEOVER) && (
-        <div style={{
-          maxWidth: 500, margin: "16px auto 0", padding: "12px 16px",
-          background: "rgba(255,255,255,0.04)", borderRadius: 14,
-          border: "1px solid rgba(255,255,255,0.06)",
-        }}>
+      {/* ─── Game Over ─── */}
+      {phase === PHASES.GAMEOVER && room && winnerId !== null && (
+        <>
           <div style={{
-            fontFamily: "'DM Mono', monospace", fontSize: 10,
-            color: "#444", marginBottom: 8, fontWeight: 500, letterSpacing: "0.08em",
-          }}>CALL HISTORY</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-            {moveHistory.map((m, i) => (
-              <span key={i} style={{
-                display: "inline-flex", alignItems: "center", gap: 4,
-                padding: "3px 7px", borderRadius: 6,
-                background: `${PLAYER_THEMES[m.player].color}15`,
-                fontFamily: "'DM Mono', monospace", fontSize: 10, fontWeight: 700,
-                color: PLAYER_THEMES[m.player].color,
-              }}>
-                <span style={{
-                  width: 5, height: 5, borderRadius: "50%",
-                  background: PLAYER_THEMES[m.player].color,
-                }} />
-                {m.number}
-              </span>
-            ))}
+            textAlign: "center", marginBottom: 20,
+            background: winnerId === myPlayerIndex
+              ? "linear-gradient(135deg, rgba(255,215,0,0.12), rgba(255,165,0,0.08))"
+              : "rgba(255,255,255,0.04)",
+            borderRadius: 20, padding: "28px 24px",
+            maxWidth: 420, margin: "0 auto 20px",
+            border: winnerId === myPlayerIndex
+              ? "1px solid rgba(255,215,0,0.25)"
+              : "1px solid rgba(255,255,255,0.08)",
+          }}>
+            <div style={{ fontSize: 56, marginBottom: 8 }}>
+              {winnerId === myPlayerIndex ? "🎉" : "😔"}
+            </div>
+            <div style={{
+              fontFamily: "'Fredoka', sans-serif", fontSize: 28, fontWeight: 700,
+              color: winnerId === myPlayerIndex ? "#FFD700" : "#ccc",
+              marginBottom: 4,
+            }}>
+              {winnerId === myPlayerIndex ? "You Win!" : `${room.players[winnerId]?.name} wins!`}
+            </div>
+            <div style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 12, color: "#555",
+            }}>
+              {winnerId === myPlayerIndex ? "Amazing game! 🏆" : "Better luck next time!"}
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
+              <button onClick={() => {
+                setLobbyCountdown(null);
+                startGameFromLobby();
+              }} style={{
+                padding: "12px 28px", borderRadius: 12, border: "none",
+                background: "linear-gradient(135deg, #E8443A, #FF6B61)",
+                color: "#fff", fontFamily: "'Fredoka', sans-serif",
+                fontSize: 15, fontWeight: 700, cursor: "pointer",
+              }}>Rematch</button>
+              <button onClick={goHome} style={{
+                padding: "12px 28px", borderRadius: 12,
+                border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)",
+                color: "#ccc", fontFamily: "'Fredoka', sans-serif",
+                fontSize: 15, fontWeight: 700, cursor: "pointer",
+              }}>Home</button>
+            </div>
           </div>
-        </div>
+
+          {/* Final card view */}
+          <MyGrid
+            player={players[myPlayerIndex]}
+            phase={phase}
+            onCellClick={() => {}}
+            onRandomFill={() => {}}
+            theme={PLAYER_THEMES[myPlayerIndex]}
+            playerName={room.players[myPlayerIndex].name}
+            playerAvatar={room.players[myPlayerIndex].avatar}
+            isMyTurn={false}
+          />
+
+          {/* Opponent results */}
+          <div style={{ maxWidth: 600, margin: "20px auto 0" }}>
+            <div style={{
+              fontFamily: "'DM Mono', monospace", fontSize: 10,
+              color: "#444", letterSpacing: "0.1em", marginBottom: 10, textAlign: "center",
+            }}>FINAL RESULTS</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
+              {room.players.map((rp, idx) => {
+                if (idx === myPlayerIndex) return null;
+                return (
+                  <OpponentCard key={rp.id}
+                    name={rp.name} avatar={rp.avatar}
+                    theme={PLAYER_THEMES[idx]}
+                    marked={players[idx]?.marked || Array(TOTAL_CELLS).fill(false)}
+                    isCurrentTurn={false}
+                    phase={phase}
+                    winner={winnerId === idx}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </>
       )}
 
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
         button:active { transform: scale(0.96) !important; }
         input::placeholder { color: #444; }
       `}</style>
