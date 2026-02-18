@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const GRID_SIZE = 5;
 const TOTAL_CELLS = GRID_SIZE * GRID_SIZE;
 const INIT_TIME = 45;
+const TURN_TIME = 30;
 const LOBBY_COUNTDOWN = 60;
 const MIN_PLAYERS = 2;
 const MAX_PLAYERS = 4;
@@ -534,8 +535,11 @@ export default function BingoGame() {
   const [moveHistory, setMoveHistory] = useState([]);
   const [joinCode, setJoinCode] = useState("");
   const [bingoAnnouncement, setBingoAnnouncement] = useState(null); // temporary "X got BINGO!" toast
+  const [turnTimer, setTurnTimer] = useState(TURN_TIME);
   const timerRef = useRef(null);
   const lobbyTimerRef = useRef(null);
+  const turnTimerRef = useRef(null);
+  const autoPlayedRef = useRef(false); // prevent double auto-play
 
   useEffect(() => {
     if (!loading && !profile?.name && phase === PHASES.HOME) setPhase(PHASES.PROFILE);
@@ -779,6 +783,51 @@ export default function BingoGame() {
     }
   }, [currentTurn, phase, room, executeBotTurn, finishedPlayers]);
 
+  // ─── Turn Timer (30s per turn) ───
+  useEffect(() => {
+    clearInterval(turnTimerRef.current);
+    autoPlayedRef.current = false;
+    if (phase !== PHASES.PLAY) return;
+    if (finishedPlayers.has(currentTurn)) return;
+    // Only run countdown for human players
+    if (room?.players[currentTurn]?.isBot) return;
+
+    setTurnTimer(TURN_TIME);
+    turnTimerRef.current = setInterval(() => {
+      setTurnTimer((t) => {
+        if (t <= 1) {
+          clearInterval(turnTimerRef.current);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(turnTimerRef.current);
+  }, [currentTurn, phase, finishedPlayers, room]);
+
+  // Auto-pick random number when turn timer expires
+  useEffect(() => {
+    if (turnTimer !== 0 || phase !== PHASES.PLAY || autoPlayedRef.current) return;
+    if (currentTurn !== myPlayerIndex) return;
+    if (finishedPlayers.has(myPlayerIndex)) return;
+    autoPlayedRef.current = true;
+
+    const myPlayer = players[myPlayerIndex];
+    if (!myPlayer) return;
+    const unmarked = [];
+    for (let i = 0; i < TOTAL_CELLS; i++) {
+      if (!myPlayer.marked[i] && myPlayer.grid[i] !== null) unmarked.push(i);
+    }
+    if (unmarked.length === 0) return;
+    const chosen = unmarked[Math.floor(Math.random() * unmarked.length)];
+    const number = myPlayer.grid[chosen];
+
+    setLastCalledNumber(number);
+    setMoveHistory((h) => [...h, { player: myPlayerIndex, number }]);
+    processNumberCall(myPlayerIndex, number, players, finishedPlayers, rankings);
+  }, [turnTimer, phase, currentTurn, myPlayerIndex, players, finishedPlayers, rankings, processNumberCall]);
+
   const handlePlayCellClick = (cellIdx) => {
     if (currentTurn !== myPlayerIndex || phase !== PHASES.PLAY) return;
     if (finishedPlayers.has(myPlayerIndex)) return;
@@ -786,6 +835,7 @@ export default function BingoGame() {
     const number = myPlayer.grid[cellIdx];
     if (number === null || myPlayer.marked[cellIdx]) return;
 
+    clearInterval(turnTimerRef.current);
     setLastCalledNumber(number);
     setMoveHistory((h) => [...h, { player: myPlayerIndex, number }]);
     processNumberCall(myPlayerIndex, number, players, finishedPlayers, rankings);
@@ -799,8 +849,8 @@ export default function BingoGame() {
   const goHome = () => {
     setPhase(PHASES.HOME); setRoom(null); setPlayers([]); setRankings([]);
     setFinishedPlayers(new Set()); setLobbyCountdown(null); setMoveHistory([]);
-    setBingoAnnouncement(null);
-    clearInterval(timerRef.current); clearInterval(lobbyTimerRef.current);
+    setBingoAnnouncement(null); setTurnTimer(TURN_TIME);
+    clearInterval(timerRef.current); clearInterval(lobbyTimerRef.current); clearInterval(turnTimerRef.current);
   };
 
   // Helper: get my finished position (null if not finished)
@@ -964,9 +1014,43 @@ export default function BingoGame() {
                 {POSITION_MEDALS[getPlayerPosition(myPlayerIndex)]} You finished {POSITION_LABELS[getPlayerPosition(myPlayerIndex)]}! Waiting for others...
               </div>
             ) : (
-              <div style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 16, fontWeight: 700,
-                color: currentTurn === myPlayerIndex ? PLAYER_THEMES[myPlayerIndex].color : "#888" }}>
-                {currentTurn === myPlayerIndex ? "🎯 Your Turn — Pick a number!" : `⏳ ${room.players[currentTurn]?.name}'s turn...`}
+              <div>
+                <div style={{ fontFamily: "'Fredoka', sans-serif", fontSize: 16, fontWeight: 700,
+                  color: currentTurn === myPlayerIndex ? PLAYER_THEMES[myPlayerIndex].color : "#888" }}>
+                  {currentTurn === myPlayerIndex ? "🎯 Your Turn — Pick a number!" : `⏳ ${room.players[currentTurn]?.name}'s turn...`}
+                </div>
+                {/* Turn timer */}
+                {!room.players[currentTurn]?.isBot && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{
+                      fontFamily: "'DM Mono', monospace", fontSize: 22, fontWeight: 700,
+                      color: turnTimer <= 10 ? "#E8443A" : turnTimer <= 20 ? "#F39237" : "#fff",
+                      transition: "color 0.3s",
+                    }}>
+                      {turnTimer}s
+                    </div>
+                    <div style={{
+                      marginTop: 4, height: 4, background: "rgba(255,255,255,0.06)",
+                      borderRadius: 2, overflow: "hidden", maxWidth: 200, margin: "0 auto",
+                    }}>
+                      <div style={{
+                        height: "100%", borderRadius: 2,
+                        background: turnTimer <= 10
+                          ? "linear-gradient(90deg, #E8443A, #FF6B61)"
+                          : turnTimer <= 20
+                          ? "linear-gradient(90deg, #F39237, #FFAB5E)"
+                          : `linear-gradient(90deg, ${PLAYER_THEMES[currentTurn]?.color || "#4ade80"}, ${PLAYER_THEMES[currentTurn]?.accent || "#22c55e"})`,
+                        width: `${(turnTimer / TURN_TIME) * 100}%`,
+                        transition: "width 1s linear",
+                      }} />
+                    </div>
+                    {turnTimer <= 5 && turnTimer > 0 && currentTurn === myPlayerIndex && (
+                      <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#E8443A", marginTop: 4 }}>
+                        Hurry! Auto-pick in {turnTimer}s
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {lastCalledNumber && (
