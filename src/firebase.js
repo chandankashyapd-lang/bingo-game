@@ -13,7 +13,7 @@ import {
 
 // ⚠️ REPLACE with your Firebase config from the Firebase Console
 const firebaseConfig = {
-    piKey: "AIzaSyCYJj8Ig94wp8aBldJlLulAoTU_N7LMEpo",
+  apiKey: "AIzaSyCYJj8Ig94wp8aBldJlLulAoTU_N7LMEpo",
   authDomain: "bingo-game-60c17.firebaseapp.com",
   databaseURL: "https://bingo-game-60c17-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "bingo-game-60c17",
