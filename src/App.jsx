@@ -536,6 +536,7 @@ export default function BingoGame() {
   const [joinCode, setJoinCode] = useState("");
   const [bingoAnnouncement, setBingoAnnouncement] = useState(null); // temporary "X got BINGO!" toast
   const [turnTimer, setTurnTimer] = useState(TURN_TIME);
+  const [turnDirection, setTurnDirection] = useState(1); // 1 = forward, -1 = reverse (snake draft)
   const timerRef = useRef(null);
   const lobbyTimerRef = useRef(null);
   const turnTimerRef = useRef(null);
@@ -600,6 +601,7 @@ export default function BingoGame() {
       manualNext: 1, placed: new Set(), ready: false,
     })));
     setCurrentTurn(Math.floor(Math.random() * numP));
+    setTurnDirection(1);
     setInitTimer(INIT_TIME);
     setRankings([]);
     setFinishedPlayers(new Set());
@@ -735,12 +737,37 @@ export default function BingoGame() {
     setRankings(updatedRankings);
     setFinishedPlayers(updatedFinished);
 
-    // Advance to next active player
-    let nextTurn = (callerIdx + 1) % totalPlayers;
-    while (updatedFinished.has(nextTurn)) {
-      nextTurn = (nextTurn + 1) % totalPlayers;
-    }
-    setCurrentTurn(nextTurn);
+    // Snake draft turn advancement
+    // Forward: 0→1→2→3, then reverse: 3→2→1→0, then forward again...
+    setTurnDirection((prevDir) => {
+      let dir = prevDir;
+      let nextTurn = callerIdx + dir;
+
+      // If we hit a boundary, reverse direction
+      if (nextTurn < 0 || nextTurn >= totalPlayers) {
+        dir = -dir;
+        nextTurn = callerIdx + dir;
+        // Edge case: if still out of bounds, stay in place (will skip below)
+        if (nextTurn < 0) nextTurn = 0;
+        if (nextTurn >= totalPlayers) nextTurn = totalPlayers - 1;
+      }
+
+      // Skip finished players in current direction
+      let attempts = 0;
+      while (updatedFinished.has(nextTurn) && attempts < totalPlayers * 2) {
+        nextTurn += dir;
+        if (nextTurn < 0 || nextTurn >= totalPlayers) {
+          dir = -dir;
+          nextTurn += dir * 2; // reverse and step
+          if (nextTurn < 0) nextTurn = 0;
+          if (nextTurn >= totalPlayers) nextTurn = totalPlayers - 1;
+        }
+        attempts++;
+      }
+
+      setCurrentTurn(nextTurn);
+      return dir;
+    });
 
     return { nextPlayers, updatedFinished, updatedRankings, gameOver: false };
   }, [room, myPlayerIndex, updateProfile]);
@@ -849,7 +876,7 @@ export default function BingoGame() {
   const goHome = () => {
     setPhase(PHASES.HOME); setRoom(null); setPlayers([]); setRankings([]);
     setFinishedPlayers(new Set()); setLobbyCountdown(null); setMoveHistory([]);
-    setBingoAnnouncement(null); setTurnTimer(TURN_TIME);
+    setBingoAnnouncement(null); setTurnTimer(TURN_TIME); setTurnDirection(1);
     clearInterval(timerRef.current); clearInterval(lobbyTimerRef.current); clearInterval(turnTimerRef.current);
   };
 
