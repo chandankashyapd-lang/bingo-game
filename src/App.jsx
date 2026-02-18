@@ -599,7 +599,7 @@ export default function BingoGame() {
       grid: createEmptyGrid(), marked: Array(TOTAL_CELLS).fill(false),
       manualNext: 1, placed: new Set(), ready: false,
     })));
-    setCurrentTurn(0);
+    setCurrentTurn(Math.floor(Math.random() * numP));
     setInitTimer(INIT_TIME);
     setRankings([]);
     setFinishedPlayers(new Set());
