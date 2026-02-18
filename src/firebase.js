@@ -6,11 +6,14 @@ import {
   getDatabase, ref, set, get, update, remove, push,
   onValue, onDisconnect, off, serverTimestamp
 } from 'firebase/database';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import {
+  getAuth, signInAnonymously, onAuthStateChanged,
+  GoogleAuthProvider, signInWithPopup, linkWithPopup, signOut
+} from 'firebase/auth';
 
 // ⚠️ REPLACE with your Firebase config from the Firebase Console
 const firebaseConfig = {
-  apiKey: "AIzaSyCYJj8Ig94wp8aBldJlLulAoTU_N7LMEpo",
+    piKey: "AIzaSyCYJj8Ig94wp8aBldJlLulAoTU_N7LMEpo",
   authDomain: "bingo-game-60c17.firebaseapp.com",
   databaseURL: "https://bingo-game-60c17-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "bingo-game-60c17",
@@ -23,6 +26,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getDatabase(app);
 export const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
 
 // ─── Auth ───
 export function initAuth(callback) {
@@ -33,6 +37,60 @@ export function initAuth(callback) {
       signInAnonymously(auth).catch(console.error);
     }
   });
+}
+
+// Sign in with Google (fresh sign-in, replaces anonymous)
+export async function signInWithGoogle() {
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (e) {
+    console.error("Google sign-in error:", e);
+    throw e;
+  }
+}
+
+// Link Google account to existing anonymous account (keeps same UID & data)
+export async function linkGoogleAccount() {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Not logged in");
+
+  try {
+    const result = await linkWithPopup(user, googleProvider);
+    return result.user;
+  } catch (e) {
+    // If already linked or account exists, sign in directly
+    if (e.code === "auth/credential-already-in-use" || e.code === "auth/provider-already-linked") {
+      // Sign in with Google instead — user will get their Google UID
+      const result = await signInWithPopup(auth, googleProvider);
+      return result.user;
+    }
+    console.error("Link error:", e);
+    throw e;
+  }
+}
+
+// Sign out
+export async function logOut() {
+  await signOut(auth);
+}
+
+// Check if user has Google linked
+export function isGoogleLinked(user) {
+  if (!user) return false;
+  return user.providerData?.some((p) => p.providerId === "google.com") || false;
+}
+
+// Get Google display info
+export function getGoogleInfo(user) {
+  if (!user) return null;
+  const google = user.providerData?.find((p) => p.providerId === "google.com");
+  if (!google) return null;
+  return {
+    name: google.displayName,
+    email: google.email,
+    photo: google.photoURL,
+  };
 }
 
 // ─── Room Management ───
